@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wayne Heaney <wayne.heaney@gmail.com>
+Date: Mon, 30 Jun 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: allwinner: cubie-a7s: prefer sink role on USB-C
+
+The husb311 PD controller on port0 defaults to source role, causing it
+to attempt to power the host rather than draw power from it.  With no PD
+contract the board operates at the USB 2.0 default 5V/500mA, which is
+insufficient under DisplayLink rendering load and causes voltage sag on
+the USB host ports (hub EPROTO errors on attached devices).
+
+Add try-power-role = "sink" so the husb311 prefers sink during PD
+negotiation and accepts the host's 5V/2A offer (the existing sink-pdos
+already advertise PDO_VAR up to 2A at 5V).
+
+---
+ arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts b/arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts
+--- a/arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts
++++ b/arch/arm64/boot/dts/allwinner/sun60i-a733-cubie-a7s.dts
+@@ -1740,6 +1740,7 @@
+ 			compatible = "usb-c-connector";
+ 			label = "USB-C";
+ 			data-role = "dual";
+ 			power-role = "dual";
++			try-power-role = "sink";
+ 			op-sink-microwatt = <1000000>;
+ 			typec-power-opmode = "default";
