@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Wayne Heaney <wayne.heaney@gmail.com>
+Date: Thu, 03 Jul 2026 00:00:00 -0700
+Subject: [PATCH] usb: gadget: support vendor-specific descriptors under FunctionFS
+
+The composite gadget core stalls a GET_DESCRIPTOR request for any
+descriptor type it does not itself recognise: composite_setup()'s
+GET_DESCRIPTOR handler switches on the high byte of wValue and, with no
+matching case, leaves value at its -EOPNOTSUPP default and breaks to
+check_value: without ever dispatching to the function's ->setup().  The
+"punt to the function" (unknown:) fallback is only reached for
+unrecognised bRequest values, not for a recognised GET_DESCRIPTOR whose
+descriptor sub-type is unknown.
+
+This makes a device-recipient GET_DESCRIPTOR for a vendor descriptor type
+(e.g. DisplayLink's 0x5f) structurally unreachable by any FunctionFS
+function, because FunctionFS always sits behind composite_setup().  The
+DisplayLink host driver on Linux issues exactly such a request
+(usb_get_descriptor(udev, 0x5f, ...)) and, when it is stalled, logs
+"Unrecognized vendor firmware descriptor" and cannot select its channel.
+
+Route vendor-type descriptor requests to the function's ->setup() instead
+of stalling them, and let the FunctionFS descriptor-blob validator accept
+vendor-type descriptors rather than rejecting the whole blob with -EINVAL.
+Both changes are gated on USB_TYPE_VENDOR, so standard descriptor handling
+is unchanged.
+
+Based on doominator42/ZeroKVM's
+901-usb-gadget-support-vendor-descriptors.patch, re-based onto the
+sun60iw2 6.6 vendor tree.
+
+Signed-off-by: Wayne Heaney <wayne.heaney@gmail.com>
+---
+diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
+index 4f32698..a279fbb 100644
+--- a/drivers/usb/gadget/composite.c
++++ b/drivers/usb/gadget/composite.c
+@@ -1905,6 +1905,15 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 				memcpy(req->buf, config->descriptors[0], value);
+ 			}
+ 			break;
++		default:
++			/*
++			 * Vendor-specific descriptor types (e.g. DisplayLink's
++			 * 0x5f) are not handled by the composite core; punt to
++			 * the function's ->setup() rather than stalling here.
++			 */
++			if (((w_value >> 8) & USB_TYPE_MASK) == USB_TYPE_VENDOR)
++				goto unknown;
++			break;
+ 		}
+ 		break;
+ 
+diff --git a/drivers/usb/gadget/function/f_fs.c b/drivers/usb/gadget/function/f_fs.c
+index 4a88546..e2c65d7 100644
+--- a/drivers/usb/gadget/function/f_fs.c
++++ b/drivers/usb/gadget/function/f_fs.c
+@@ -2117,6 +2117,10 @@ static int __must_check ffs_do_single_desc(char *data, unsigned len,
+ 		return -EINVAL;
+ 
+ 	default:
++		/* Accept vendor-specific descriptor types in the FFS blob. */
++		if ((_ds->bDescriptorType & USB_TYPE_MASK) == USB_TYPE_VENDOR)
++			return length;
++
+ 		/* We should never be here */
+ 		pr_vdebug("unknown descriptor: %d\n", _ds->bDescriptorType);
+ 		return -EINVAL;
+-- 
+2.34.1
